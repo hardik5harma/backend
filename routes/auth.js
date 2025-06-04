@@ -16,6 +16,10 @@ router.post('/register', async (req, res) => {
             return res.status(400).json({ message: 'Email already registered' });
         }
 
+        // Generate verification token
+        const verificationToken = crypto.randomBytes(32).toString('hex');
+        const verificationTokenExpires = Date.now() + 24 * 3600000; // 24 hours
+
         // Create new user
         const user = new User({
             email,
@@ -23,31 +27,38 @@ router.post('/register', async (req, res) => {
             name,
             role,
             phoneNumber,
-            address
+            address,
+            verificationToken,
+            verificationTokenExpires,
+            isVerified: false
         });
 
         await user.save();
 
-        // Generate JWT token
-        const token = jwt.sign(
-            { userId: user._id },
-            process.env.JWT_SECRET || 'your-secret-key',
-            { expiresIn: '24h' }
-        );
-
-        res.status(201).json({
-            token,
-            user: {
-                id: user._id,
-                email: user.email,
-                name: user.name,
-                role: user.role
-            },
-            message: 'Registration successful'
-        });
+        // Send verification email
+        try {
+            await sendVerificationEmail(email, verificationToken);
+            res.status(201).json({
+                message: 'Registration successful. Please check your email to verify your account.',
+                user: {
+                    id: user._id,
+                    email: user.email,
+                    name: user.name,
+                    role: user.role,
+                    isVerified: user.isVerified
+                }
+            });
+        } catch (emailError) {
+            console.error('Error sending verification email:', emailError);
+            // If email fails, remove the verification token
+            user.verificationToken = undefined;
+            user.verificationTokenExpires = undefined;
+            await user.save();
+            throw new Error('Failed to send verification email. Please try again later.');
+        }
     } catch (error) {
         console.error('Registration error:', error);
-        res.status(500).json({ message: 'Error creating user' });
+        res.status(500).json({ message: error.message || 'Error creating user' });
     }
 });
 
@@ -223,6 +234,89 @@ router.post('/resend-verification', async (req, res) => {
         res.json({ message: 'Verification email has been resent' });
     } catch (error) {
         res.status(500).json({ message: 'Error resending verification email', error: error.message });
+    }
+});
+
+// Send verification code route
+router.post('/send-verification', async (req, res) => {
+    try {
+        const { email } = req.body;
+        console.log('Received verification request for email:', email);
+
+        if (!email) {
+            return res.status(400).json({ message: 'Email is required' });
+        }
+
+        // Check if user already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ message: 'Email already registered' });
+        }
+
+        // Generate verification code (6 digits)
+        const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        console.log('Generated verification code:', verificationCode);
+        
+        // Store verification code in user document
+        const user = new User({
+            email,
+            verificationToken: verificationCode,
+            verificationTokenExpires: Date.now() + 10 * 60000, // 10 minutes
+            password: 'temporary', // Temporary password that will be updated during registration
+            name: 'temporary', // Temporary name that will be updated during registration
+            role: 'User' // Default role that will be updated during registration
+        });
+
+        await user.save();
+        console.log('Saved user with verification code');
+
+        // Send verification email
+        try {
+            await sendVerificationEmail(email, verificationCode);
+            console.log('Verification email sent successfully');
+            res.json({ 
+                message: 'Verification code sent successfully',
+                email: email // Send back the email for confirmation
+            });
+        } catch (emailError) {
+            console.error('Error sending verification email:', emailError);
+            // If email fails, remove the verification token
+            await User.deleteOne({ email });
+            throw new Error('Failed to send verification code. Please try again later.');
+        }
+    } catch (error) {
+        console.error('Send verification error:', error);
+        res.status(500).json({ message: error.message || 'Error sending verification code' });
+    }
+});
+
+// Verify email with code route
+router.post('/verify-email', async (req, res) => {
+    try {
+        const { email, verificationCode } = req.body;
+
+        if (!email || !verificationCode) {
+            return res.status(400).json({ message: 'Email and verification code are required' });
+        }
+
+        const user = await User.findOne({
+            email,
+            verificationToken: verificationCode,
+            verificationTokenExpires: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: 'Invalid or expired verification code' });
+        }
+
+        user.isVerified = true;
+        user.verificationToken = undefined;
+        user.verificationTokenExpires = undefined;
+        await user.save();
+
+        res.json({ message: 'Email verified successfully' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error verifying email', error: error.message });
     }
 });
 

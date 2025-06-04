@@ -31,7 +31,7 @@ try {
     console.error('Error creating email transporter:', error);
 }
 
-const sendVerificationEmail = async (email, verificationToken) => {
+const sendVerificationEmail = async (email, verificationCode) => {
     if (!transporter) {
         console.error('Transporter not initialized. Check if EMAIL_USER and EMAIL_PASSWORD are set in .env');
         throw new Error('Email service not configured. Please check your .env file.');
@@ -45,23 +45,29 @@ const sendVerificationEmail = async (email, verificationToken) => {
         throw new Error('Email configuration is incomplete. Please check your .env file.');
     }
 
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
+    console.log('Sending verification email to:', email, 'with code:', verificationCode);
     
     const mailOptions = {
         from: process.env.EMAIL_USER,
         to: email,
-        subject: 'Verify Your Email',
+        subject: 'Email Verification Code',
         html: `
-            <h1>Email Verification</h1>
-            <p>Thank you for registering! Please click the link below to verify your email address:</p>
-            <a href="${verificationUrl}">Verify Email</a>
-            <p>This link will expire in 24 hours.</p>
-            <p>If you didn't create an account, please ignore this email.</p>
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h1 style="color: #333; text-align: center;">Email Verification</h1>
+                <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
+                    <p style="color: #666; margin-bottom: 15px;">Your verification code is:</p>
+                    <div style="background-color: #fff; padding: 15px; border-radius: 5px; text-align: center; font-size: 24px; font-weight: bold; color: #4a5568; letter-spacing: 5px;">
+                        ${verificationCode}
+                    </div>
+                </div>
+                <p style="color: #666;">This code will expire in 10 minutes.</p>
+                <p style="color: #666;">If you didn't request this verification code, please ignore this email.</p>
+            </div>
         `
     };
 
     try {
-        console.log('Attempting to send verification email to:', email);
+        console.log('Attempting to send verification email...');
         const info = await transporter.sendMail(mailOptions);
         console.log('Verification email sent successfully:', info.response);
         return true;
